@@ -135,8 +135,10 @@ static void __exception_irq_entry tzic_handle_irq(struct pt_regs *regs)
 		handled = 0;
 
 		for (i = 0; i < 4; i++) {
-			stat = __raw_readl(tzic_base + TZIC_HIPND(i)) &
-				__raw_readl(tzic_base + TZIC_INTSEC0(i));
+			stat = __raw_readl(tzic_base + TZIC_HIPND(i));
+
+			if (!GENODE_TZ_VMM) {
+				stat &= __raw_readl(tzic_base + TZIC_INTSEC0(i)); }
 
 			while (stat) {
 				handled = 1;
