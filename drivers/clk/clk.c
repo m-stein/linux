@@ -542,6 +542,8 @@ static int clk_disable_unused(void)
 {
 	struct clk_core *clk;
 
+	if (GENODE_TZ_VMM) { printk(KERN_NOTICE "GENODE_TZ_VMM: skip %s\n", __func__); return 0; }
+
 	if (clk_ignore_unused) {
 		pr_warn("clk: Not disabling unused clocks\n");
 		return 0;
@@ -1025,6 +1027,8 @@ void clk_disable(struct clk *clk)
 {
 	unsigned long flags;
 
+	if (GENODE_TZ_VMM) { return; }
+
 	if (IS_ERR_OR_NULL(clk))
 		return;
 
@@ -1088,6 +1092,8 @@ int clk_enable(struct clk *clk)
 {
 	unsigned long flags;
 	int ret;
+
+	if (GENODE_TZ_VMM) { return 0; }
 
 	flags = clk_enable_lock();
 	ret = __clk_enable(clk);
