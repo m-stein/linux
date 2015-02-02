@@ -18,6 +18,7 @@
 #include <linux/irqdomain.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <genode_tz_vmm.h>
 
 #include <asm/mach/irq.h>
 #include <asm/exception.h>
@@ -52,6 +53,37 @@
 
 static void __iomem *tzic_base;
 static struct irq_domain *domain;
+
+#ifdef GENODE_TZ_VMM
+
+/**
+ * Resolve physical to virtual interrupt number
+ */
+unsigned long tzic_domain_irq(unsigned long const hwirq)
+{
+	if (!domain) {
+		printk(KERN_ERR "TZIC: IRQ domain not initialized\n");
+		return ~0;
+	}
+	return irq_find_mapping(domain, hwirq);
+}
+
+#define TZIC_UL_BITS(val, shift, width) (((1UL <<  width) - 1) & val) << shift
+#define TZIC_SWINT_INTID_BITS(val)      TZIC_UL_BITS(val,  0, 10)
+#define TZIC_SWINT_INTNEG_BITS(val)     TZIC_UL_BITS(val, 31,  1)
+
+/**
+ * End interrupt that was triggered via the SWINT register
+ */
+void tzic_end_sw_irq(unsigned long const hwirq)
+{
+	unsigned const swint =
+		TZIC_SWINT_INTID_BITS(hwirq) |
+		TZIC_SWINT_INTNEG_BITS(1);
+	__raw_writel(swint, tzic_base + TZIC_SWINT);
+}
+
+#endif
 
 #define TZIC_NUM_IRQS 128
 
@@ -135,8 +167,13 @@ static void __exception_irq_entry tzic_handle_irq(struct pt_regs *regs)
 		handled = 0;
 
 		for (i = 0; i < 4; i++) {
-			stat = __raw_readl(tzic_base + TZIC_HIPND(i)) &
-				__raw_readl(tzic_base + TZIC_INTSEC0(i));
+			stat = __raw_readl(tzic_base + TZIC_HIPND(i));
+
+#ifndef GENODE_TZ_VMM
+
+				stat &= __raw_readl(tzic_base + TZIC_INTSEC0(i));
+
+#endif /* GENODE_TZ_VMM */
 
 			while (stat) {
 				handled = 1;

@@ -592,6 +592,17 @@ config SERIAL_IMX_CONSOLE
 	  "console=ttymxc0". (Try "man bootparam" or see the documentation of
 	  your bootloader about how to pass options to the kernel at boot time.)
 
+config SERIAL_GENODE
+	bool "Paravirtualized serial port via Genode SMC API"
+	depends on GENODE_TZ_VMM=y
+	select SERIAL_CORE
+	select RATIONAL
+
+config SERIAL_GENODE_CONSOLE
+	bool "Console on paravirtualized serial port via Genode SMC API"
+	depends on SERIAL_GENODE=y
+	select SERIAL_CORE_CONSOLE
+
 config SERIAL_UARTLITE
 	tristate "Xilinx uartlite serial port support"
 	depends on PPC32 || MICROBLAZE || MFD_TIMBERDALE || ARCH_ZYNQ

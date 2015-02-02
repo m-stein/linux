@@ -15,6 +15,10 @@ menuconfig BLK_DEV
 
 if BLK_DEV
 
+config BLK_DEV_GENODE
+	bool "Block driver for Genode SMC block-API"
+	depends on GENODE_TZ_VMM=y
+
 config BLK_DEV_NULL_BLK
 	tristate "Null test block driver"
 

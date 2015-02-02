@@ -1483,6 +1483,10 @@ config FUTEX
 	  support for "fast userspace mutexes".  The resulting kernel may not
 	  run glibc-based applications correctly.
 
+config GENODE_TZ_VMM
+	bool "Wether running in a Trustzone VM monitored by Genode"
+	depends on SOC_IMX53
+
 config HAVE_FUTEX_CMPXCHG
 	bool
 	depends on FUTEX

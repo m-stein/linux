@@ -17,11 +17,11 @@
 
 / {
 	chosen {
-		stdout-path = &uart1;
+		bootargs = "console=ttyS0 root=/dev/sda1 rootwait rw init=/sbin/init clk_ignore_unused";
 	};
 
 	memory {
-		reg = <0x70000000 0x20000000>;
+		reg = <0x80000000 0x10000000>;
 	};
 
 	leds {
