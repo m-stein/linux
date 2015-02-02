@@ -54,6 +54,20 @@
 #include "console_cmdline.h"
 #include "braille.h"
 
+
+bool genode_tz_io(void * const r, void volatile * const p, unsigned const v)
+{
+	enum {
+		UART1_VBASE0 = 0x53fbc000, UART1_VEND0 = 0x53fbc040,
+		UART1_VBASE1 = 0x53fbc044, UART1_VEND1 = 0x53fc0000,
+		TZIC_VBASE0  = 0xf4bfc000, TZIC_VEND0  = 0xf4c00000,
+		GPT_VBASE0   = 0xf57a0000, GPT_VEND0   = 0xf57a1000,
+		CM_VBASE0    = 0xf57d4000, CM_VEND0    = 0xf57d5000,
+	};
+	return 0;
+}
+
+
 int console_printk[4] = {
 	CONSOLE_LOGLEVEL_DEFAULT,	/* console_loglevel */
 	DEFAULT_MESSAGE_LOGLEVEL,	/* default_message_loglevel */

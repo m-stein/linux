@@ -43,6 +43,10 @@
 extern void atomic_io_modify(void __iomem *reg, u32 mask, u32 set);
 extern void atomic_io_modify_relaxed(void __iomem *reg, u32 mask, u32 set);
 
+#define GENODE_TZ_VMM 1
+
+extern bool genode_tz_io(void * const r, void volatile * const p, unsigned const v);
+
 /*
  * Generic IO read/write.  These perform native-endian accesses.  Note
  * that some architectures will want to re-define __raw_{read,write}w.
@@ -71,6 +75,7 @@ extern void __raw_readsl(const void __iomem *addr, void *data, int longlen);
  */
 static inline void __raw_writew(u16 val, volatile void __iomem *addr)
 {
+	if (genode_tz_io(__builtin_return_address(0), addr, val)) { return; }
 	asm volatile("strh %1, %0"
 		     : "+Q" (*(volatile u16 __force *)addr)
 		     : "r" (val));
@@ -88,6 +93,7 @@ static inline u16 __raw_readw(const volatile void __iomem *addr)
 
 static inline void __raw_writeb(u8 val, volatile void __iomem *addr)
 {
+	if (genode_tz_io(__builtin_return_address(0), addr, val)) { return; }
 	asm volatile("strb %1, %0"
 		     : "+Qo" (*(volatile u8 __force *)addr)
 		     : "r" (val));
@@ -95,6 +101,7 @@ static inline void __raw_writeb(u8 val, volatile void __iomem *addr)
 
 static inline void __raw_writel(u32 val, volatile void __iomem *addr)
 {
+	if (genode_tz_io(__builtin_return_address(0), addr, val)) { return; }
 	asm volatile("str %1, %0"
 		     : "+Qo" (*(volatile u32 __force *)addr)
 		     : "r" (val));
