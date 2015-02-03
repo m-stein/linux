@@ -27,6 +27,7 @@
 #include <asm/msa.h>
 #include <asm/watch.h>
 #include <asm/elf.h>
+#include <asm/pgtable-bits.h>
 #include <asm/spram.h>
 #include <asm/uaccess.h>
 
@@ -53,6 +54,20 @@ static int __init dsp_disable(char *s)
 }
 
 __setup("nodsp", dsp_disable);
+
+static int mips_htw_disabled;
+
+static int __init htw_disable(char *s)
+{
+	mips_htw_disabled = 1;
+	cpu_data[0].options &= ~MIPS_CPU_HTW;
+	write_c0_pwctl(read_c0_pwctl() &
+		       ~(1 << MIPS_PWCTL_PWEN_SHIFT));
+
+	return 1;
+}
+
+__setup("nohtw", htw_disable);
 
 static inline void check_errata(void)
 {
@@ -130,14 +145,13 @@ static inline int __cpu_has_fpu(void)
 
 static inline unsigned long cpu_get_msa_id(void)
 {
-	unsigned long status, conf5, msa_id;
+	unsigned long status, msa_id;
 
 	status = read_c0_status();
 	__enable_fpu(FPU_64BIT);
-	conf5 = read_c0_config5();
 	enable_msa();
 	msa_id = read_msa_ir();
-	write_c0_config5(conf5);
+	disable_msa();
 	write_c0_status(status);
 	return msa_id;
 }
@@ -179,6 +193,32 @@ static void set_isa(struct cpuinfo_mips *c, unsigned int isa)
 static char unknown_isa[] = KERN_ERR \
 	"Unsupported ISA type, c0.config0: %d.";
 
+static unsigned int calculate_ftlb_probability(struct cpuinfo_mips *c)
+{
+
+	unsigned int probability = c->tlbsize / c->tlbsizevtlb;
+
+	/*
+	 * 0 = All TLBWR instructions go to FTLB
+	 * 1 = 15:1: For every 16 TBLWR instructions, 15 go to the
+	 * FTLB and 1 goes to the VTLB.
+	 * 2 = 7:1: As above with 7:1 ratio.
+	 * 3 = 3:1: As above with 3:1 ratio.
+	 *
+	 * Use the linear midpoint as the probability threshold.
+	 */
+	if (probability >= 12)
+		return 1;
+	else if (probability >= 6)
+		return 2;
+	else
+		/*
+		 * So FTLB is less than 4 times bigger than VTLB.
+		 * A 3:1 ratio can still be useful though.
+		 */
+		return 3;
+}
+
 static void set_ftlb_enable(struct cpuinfo_mips *c, int enable)
 {
 	unsigned int config6;
@@ -189,9 +229,14 @@ static void set_ftlb_enable(struct cpuinfo_mips *c, int enable)
 	case CPU_P5600:
 		/* proAptiv & related cores use Config6 to enable the FTLB */
 		config6 = read_c0_config6();
+		/* Clear the old probability value */
+		config6 &= ~(3 << MIPS_CONF6_FTLBP_SHIFT);
 		if (enable)
 			/* Enable FTLB */
-			write_c0_config6(config6 | MIPS_CONF6_FTLBEN);
+			write_c0_config6(config6 |
+					 (calculate_ftlb_probability(c)
+					  << MIPS_CONF6_FTLBP_SHIFT)
+					 | MIPS_CONF6_FTLBEN);
 		else
 			/* Disable FTLB */
 			write_c0_config6(config6 &  ~MIPS_CONF6_FTLBEN);
@@ -321,6 +366,9 @@ static inline unsigned int decode_config3(struct cpuinfo_mips *c)
 		c->options |= MIPS_CPU_SEGMENTS;
 	if (config3 & MIPS_CONF3_MSA)
 		c->ases |= MIPS_ASE_MSA;
+	/* Only tested on 32-bit cores */
+	if ((config3 & MIPS_CONF3_PW) && config_enabled(CONFIG_32BIT))
+		c->options |= MIPS_CPU_HTW;
 
 	return config3 & MIPS_CONF_M;
 }
@@ -389,6 +437,8 @@ static inline unsigned int decode_config5(struct cpuinfo_mips *c)
 
 	if (config5 & MIPS_CONF5_EVA)
 		c->options |= MIPS_CPU_EVA;
+	if (config5 & MIPS_CONF5_MRP)
+		c->options |= MIPS_CPU_MAAR;
 
 	return config5 & MIPS_CONF_M;
 }
@@ -420,6 +470,15 @@ static void decode_configs(struct cpuinfo_mips *c)
 		ok = decode_config5(c);
 
 	mips_probe_watch_registers(c);
+
+	if (cpu_has_rixi) {
+		/* Enable the RIXI exceptions */
+		write_c0_pagegrain(read_c0_pagegrain() | PG_IEC);
+		back_to_back_c0_hazard();
+		/* Verify the IEC bit is set */
+		if (read_c0_pagegrain() & PG_IEC)
+			c->options |= MIPS_CPU_RIXIEX;
+	}
 
 #ifndef CONFIG_MIPS_CPS
 	if (cpu_has_mips_r2) {
@@ -729,24 +788,34 @@ static inline void cpu_probe_legacy(struct cpuinfo_mips *c, unsigned int cpu)
 			c->cputype = CPU_LOONGSON2;
 			__cpu_name[cpu] = "ICT Loongson-2";
 			set_elf_platform(cpu, "loongson2e");
+			set_isa(c, MIPS_CPU_ISA_III);
 			break;
 		case PRID_REV_LOONGSON2F:
 			c->cputype = CPU_LOONGSON2;
 			__cpu_name[cpu] = "ICT Loongson-2";
 			set_elf_platform(cpu, "loongson2f");
+			set_isa(c, MIPS_CPU_ISA_III);
 			break;
 		case PRID_REV_LOONGSON3A:
 			c->cputype = CPU_LOONGSON3;
 			__cpu_name[cpu] = "ICT Loongson-3";
 			set_elf_platform(cpu, "loongson3a");
+			set_isa(c, MIPS_CPU_ISA_M64R1);
+			break;
+		case PRID_REV_LOONGSON3B_R1:
+		case PRID_REV_LOONGSON3B_R2:
+			c->cputype = CPU_LOONGSON3;
+			__cpu_name[cpu] = "ICT Loongson-3";
+			set_elf_platform(cpu, "loongson3b");
+			set_isa(c, MIPS_CPU_ISA_M64R1);
 			break;
 		}
 
-		set_isa(c, MIPS_CPU_ISA_III);
 		c->options = R4K_OPTS |
 			     MIPS_CPU_FPU | MIPS_CPU_LLSC |
 			     MIPS_CPU_32FPR;
 		c->tlbsize = 64;
+		c->writecombine = _CACHE_UNCACHED_ACCELERATED;
 		break;
 	case PRID_IMP_LOONGSON_32:  /* Loongson-1 */
 		decode_configs(c);
@@ -765,67 +834,83 @@ static inline void cpu_probe_legacy(struct cpuinfo_mips *c, unsigned int cpu)
 
 static inline void cpu_probe_mips(struct cpuinfo_mips *c, unsigned int cpu)
 {
+	c->writecombine = _CACHE_UNCACHED_ACCELERATED;
 	switch (c->processor_id & PRID_IMP_MASK) {
 	case PRID_IMP_4KC:
 		c->cputype = CPU_4KC;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 4Kc";
 		break;
 	case PRID_IMP_4KEC:
 	case PRID_IMP_4KECR2:
 		c->cputype = CPU_4KEC;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 4KEc";
 		break;
 	case PRID_IMP_4KSC:
 	case PRID_IMP_4KSD:
 		c->cputype = CPU_4KSC;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 4KSc";
 		break;
 	case PRID_IMP_5KC:
 		c->cputype = CPU_5KC;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 5Kc";
 		break;
 	case PRID_IMP_5KE:
 		c->cputype = CPU_5KE;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 5KE";
 		break;
 	case PRID_IMP_20KC:
 		c->cputype = CPU_20KC;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 20Kc";
 		break;
 	case PRID_IMP_24K:
 		c->cputype = CPU_24K;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 24Kc";
 		break;
 	case PRID_IMP_24KE:
 		c->cputype = CPU_24K;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 24KEc";
 		break;
 	case PRID_IMP_25KF:
 		c->cputype = CPU_25KF;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 25Kc";
 		break;
 	case PRID_IMP_34K:
 		c->cputype = CPU_34K;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 34Kc";
 		break;
 	case PRID_IMP_74K:
 		c->cputype = CPU_74K;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 74Kc";
 		break;
 	case PRID_IMP_M14KC:
 		c->cputype = CPU_M14KC;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS M14Kc";
 		break;
 	case PRID_IMP_M14KEC:
 		c->cputype = CPU_M14KEC;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS M14KEc";
 		break;
 	case PRID_IMP_1004K:
 		c->cputype = CPU_1004K;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 1004Kc";
 		break;
 	case PRID_IMP_1074K:
 		c->cputype = CPU_1074K;
+		c->writecombine = _CACHE_UNCACHED;
 		__cpu_name[cpu] = "MIPS 1074Kc";
 		break;
 	case PRID_IMP_INTERAPTIV_UP:
@@ -899,6 +984,7 @@ static inline void cpu_probe_sibyte(struct cpuinfo_mips *c, unsigned int cpu)
 {
 	decode_configs(c);
 
+	c->writecombine = _CACHE_UNCACHED_ACCELERATED;
 	switch (c->processor_id & PRID_IMP_MASK) {
 	case PRID_IMP_SB1:
 		c->cputype = CPU_SB1;
@@ -1030,6 +1116,7 @@ static inline void cpu_probe_ingenic(struct cpuinfo_mips *c, unsigned int cpu)
 	switch (c->processor_id & PRID_IMP_MASK) {
 	case PRID_IMP_JZRISC:
 		c->cputype = CPU_JZRISC;
+		c->writecombine = _CACHE_UNCACHED_ACCELERATED;
 		__cpu_name[cpu] = "Ingenic JZRISC";
 		break;
 	default:
@@ -1136,6 +1223,7 @@ void cpu_probe(void)
 	c->processor_id = PRID_IMP_UNKNOWN;
 	c->fpu_id	= FPIR_IMP_NONE;
 	c->cputype	= CPU_UNKNOWN;
+	c->writecombine = _CACHE_UNCACHED;
 
 	c->processor_id = read_c0_prid();
 	switch (c->processor_id & PRID_COMP_MASK) {
@@ -1186,6 +1274,12 @@ void cpu_probe(void)
 
 	if (mips_dsp_disabled)
 		c->ases &= ~(MIPS_ASE_DSP | MIPS_ASE_DSP2P);
+
+	if (mips_htw_disabled) {
+		c->options &= ~MIPS_CPU_HTW;
+		write_c0_pwctl(read_c0_pwctl() &
+			       ~(1 << MIPS_PWCTL_PWEN_SHIFT));
+	}
 
 	if (c->options & MIPS_CPU_FPU) {
 		c->fpu_id = cpu_get_fpu_id();

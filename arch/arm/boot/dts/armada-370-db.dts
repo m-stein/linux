@@ -43,6 +43,8 @@
 			};
 
 			mdio {
+				pinctrl-0 = <&mdio_pins>;
+				pinctrl-names = "default";
 				phy0: ethernet-phy@0 {
 					reg = <0>;
 				};
@@ -53,11 +55,15 @@
 			};
 
 			ethernet@70000 {
+				pinctrl-0 = <&ge0_rgmii_pins>;
+				pinctrl-names = "default";
 				status = "okay";
 				phy = <&phy0>;
 				phy-mode = "rgmii-id";
 			};
 			ethernet@74000 {
+				pinctrl-0 = <&ge1_rgmii_pins>;
+				pinctrl-names = "default";
 				status = "okay";
 				phy = <&phy1>;
 				phy-mode = "rgmii-id";
@@ -94,30 +100,6 @@
 				status = "disabled";
 				/* No CD or WP GPIOs */
 				broken-cd;
-			};
-
-			pinctrl {
-				/*
-				 * These pins might be muxed as I2S by
-				 * the bootloader, but it conflicts
-				 * with the real I2S pins that are
-				 * muxed using i2s_pins. We must mux
-				 * those pins to a function other than
-				 * I2S.
-				 */
-				pinctrl-0 = <&hog_pins1 &hog_pins2>;
-				pinctrl-names = "default";
-
-				hog_pins1: hog-pins1 {
-					marvell,pins = "mpp6",  "mpp8", "mpp10",
-						       "mpp12", "mpp13";
-					marvell,function = "gpio";
-				};
-
-				hog_pins2: hog-pins2 {
-					marvell,pins = "mpp5", "mpp7", "mpp9";
-					marvell,function = "gpo";
-				};
 			};
 
 			usb@50000 {

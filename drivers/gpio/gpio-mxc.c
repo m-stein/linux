@@ -408,8 +408,6 @@ static int mxc_gpio_probe(struct platform_device *pdev)
 	int irq_base;
 	int err;
 
-	if (GENODE_TZ_VMM) { printk(KERN_NOTICE "GENODE_TZ_VMM: skip %s\n", __func__); return -EINVAL; }
-
 	mxc_gpio_get_hw(pdev);
 
 	port = devm_kzalloc(&pdev->dev, sizeof(*port), GFP_KERNEL);
@@ -487,7 +485,7 @@ static int mxc_gpio_probe(struct platform_device *pdev)
 out_irqdesc_free:
 	irq_free_descs(irq_base, 32);
 out_gpiochip_remove:
-	WARN_ON(gpiochip_remove(&port->bgc.gc) < 0);
+	gpiochip_remove(&port->bgc.gc);
 out_bgpio_remove:
 	bgpio_remove(&port->bgc);
 out_bgio:

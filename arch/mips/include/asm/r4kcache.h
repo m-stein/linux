@@ -19,6 +19,9 @@
 #include <asm/mipsmtregs.h>
 #include <asm/uaccess.h> /* for segment_eq() */
 
+extern void (*r4k_blast_dcache)(void);
+extern void (*r4k_blast_icache)(void);
+
 /*
  * This macro return a properly sign-extended address suitable as base address
  * for indexed cache operations.  Two issues here:
@@ -254,7 +257,11 @@ static inline void protected_flush_icache_line(unsigned long addr)
  */
 static inline void protected_writeback_dcache_line(unsigned long addr)
 {
+#ifdef CONFIG_EVA
+	protected_cachee_op(Hit_Writeback_Inv_D, addr);
+#else
 	protected_cache_op(Hit_Writeback_Inv_D, addr);
+#endif
 }
 
 static inline void protected_writeback_scache_line(unsigned long addr)

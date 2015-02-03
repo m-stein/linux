@@ -227,6 +227,7 @@ struct thin_c {
 	struct list_head list;
 	struct dm_dev *pool_dev;
 	struct dm_dev *origin_dev;
+	sector_t origin_size;
 	dm_thin_id dev_id;
 
 	struct pool *pool;
@@ -554,10 +555,15 @@ static void remap_and_issue(struct thin_c *tc, struct bio *bio,
 struct dm_thin_new_mapping {
 	struct list_head list;
 
-	bool quiesced:1;
-	bool prepared:1;
 	bool pass_discard:1;
 	bool definitely_not_shared:1;
+
+	/*
+	 * Track quiescing, copying and zeroing preparation actions.  When this
+	 * counter hits zero the block is prepared and can be inserted into the
+	 * btree.
+	 */
+	atomic_t prepare_actions;
 
 	int err;
 	struct thin_c *tc;
@@ -575,43 +581,41 @@ struct dm_thin_new_mapping {
 	bio_end_io_t *saved_bi_end_io;
 };
 
-static void __maybe_add_mapping(struct dm_thin_new_mapping *m)
+static void __complete_mapping_preparation(struct dm_thin_new_mapping *m)
 {
 	struct pool *pool = m->tc->pool;
 
-	if (m->quiesced && m->prepared) {
+	if (atomic_dec_and_test(&m->prepare_actions)) {
 		list_add_tail(&m->list, &pool->prepared_mappings);
 		wake_worker(pool);
 	}
 }
 
-static void copy_complete(int read_err, unsigned long write_err, void *context)
+static void complete_mapping_preparation(struct dm_thin_new_mapping *m)
 {
 	unsigned long flags;
-	struct dm_thin_new_mapping *m = context;
 	struct pool *pool = m->tc->pool;
 
-	m->err = read_err || write_err ? -EIO : 0;
-
 	spin_lock_irqsave(&pool->lock, flags);
-	m->prepared = true;
-	__maybe_add_mapping(m);
+	__complete_mapping_preparation(m);
 	spin_unlock_irqrestore(&pool->lock, flags);
+}
+
+static void copy_complete(int read_err, unsigned long write_err, void *context)
+{
+	struct dm_thin_new_mapping *m = context;
+
+	m->err = read_err || write_err ? -EIO : 0;
+	complete_mapping_preparation(m);
 }
 
 static void overwrite_endio(struct bio *bio, int err)
 {
-	unsigned long flags;
 	struct dm_thin_endio_hook *h = dm_per_bio_data(bio, sizeof(struct dm_thin_endio_hook));
 	struct dm_thin_new_mapping *m = h->overwrite_mapping;
-	struct pool *pool = m->tc->pool;
 
 	m->err = err;
-
-	spin_lock_irqsave(&pool->lock, flags);
-	m->prepared = true;
-	__maybe_add_mapping(m);
-	spin_unlock_irqrestore(&pool->lock, flags);
+	complete_mapping_preparation(m);
 }
 
 /*----------------------------------------------------------------*/
@@ -821,10 +825,31 @@ static struct dm_thin_new_mapping *get_next_mapping(struct pool *pool)
 	return m;
 }
 
+static void ll_zero(struct thin_c *tc, struct dm_thin_new_mapping *m,
+		    sector_t begin, sector_t end)
+{
+	int r;
+	struct dm_io_region to;
+
+	to.bdev = tc->pool_dev->bdev;
+	to.sector = begin;
+	to.count = end - begin;
+
+	r = dm_kcopyd_zero(tc->pool->copier, 1, &to, 0, copy_complete, m);
+	if (r < 0) {
+		DMERR_LIMIT("dm_kcopyd_zero() failed");
+		copy_complete(1, 1, m);
+	}
+}
+
+/*
+ * A partial copy also needs to zero the uncopied region.
+ */
 static void schedule_copy(struct thin_c *tc, dm_block_t virt_block,
 			  struct dm_dev *origin, dm_block_t data_origin,
 			  dm_block_t data_dest,
-			  struct dm_bio_prison_cell *cell, struct bio *bio)
+			  struct dm_bio_prison_cell *cell, struct bio *bio,
+			  sector_t len)
 {
 	int r;
 	struct pool *pool = tc->pool;
@@ -835,8 +860,15 @@ static void schedule_copy(struct thin_c *tc, dm_block_t virt_block,
 	m->data_block = data_dest;
 	m->cell = cell;
 
+	/*
+	 * quiesce action + copy action + an extra reference held for the
+	 * duration of this function (we may need to inc later for a
+	 * partial zero).
+	 */
+	atomic_set(&m->prepare_actions, 3);
+
 	if (!dm_deferred_set_add_work(pool->shared_read_ds, &m->list))
-		m->quiesced = true;
+		complete_mapping_preparation(m); /* already quiesced */
 
 	/*
 	 * IO to pool_dev remaps to the pool target's data_dev.
@@ -857,20 +889,38 @@ static void schedule_copy(struct thin_c *tc, dm_block_t virt_block,
 
 		from.bdev = origin->bdev;
 		from.sector = data_origin * pool->sectors_per_block;
-		from.count = pool->sectors_per_block;
+		from.count = len;
 
 		to.bdev = tc->pool_dev->bdev;
 		to.sector = data_dest * pool->sectors_per_block;
-		to.count = pool->sectors_per_block;
+		to.count = len;
 
 		r = dm_kcopyd_copy(pool->copier, &from, 1, &to,
 				   0, copy_complete, m);
 		if (r < 0) {
-			mempool_free(m, pool->mapping_pool);
 			DMERR_LIMIT("dm_kcopyd_copy() failed");
-			cell_error(pool, cell);
+			copy_complete(1, 1, m);
+
+			/*
+			 * We allow the zero to be issued, to simplify the
+			 * error path.  Otherwise we'd need to start
+			 * worrying about decrementing the prepare_actions
+			 * counter.
+			 */
+		}
+
+		/*
+		 * Do we need to zero a tail region?
+		 */
+		if (len < pool->sectors_per_block && pool->pf.zero_new_blocks) {
+			atomic_inc(&m->prepare_actions);
+			ll_zero(tc, m,
+				data_dest * pool->sectors_per_block + len,
+				(data_dest + 1) * pool->sectors_per_block);
 		}
 	}
+
+	complete_mapping_preparation(m); /* drop our ref */
 }
 
 static void schedule_internal_copy(struct thin_c *tc, dm_block_t virt_block,
@@ -878,15 +928,8 @@ static void schedule_internal_copy(struct thin_c *tc, dm_block_t virt_block,
 				   struct dm_bio_prison_cell *cell, struct bio *bio)
 {
 	schedule_copy(tc, virt_block, tc->pool_dev,
-		      data_origin, data_dest, cell, bio);
-}
-
-static void schedule_external_copy(struct thin_c *tc, dm_block_t virt_block,
-				   dm_block_t data_dest,
-				   struct dm_bio_prison_cell *cell, struct bio *bio)
-{
-	schedule_copy(tc, virt_block, tc->origin_dev,
-		      virt_block, data_dest, cell, bio);
+		      data_origin, data_dest, cell, bio,
+		      tc->pool->sectors_per_block);
 }
 
 static void schedule_zero(struct thin_c *tc, dm_block_t virt_block,
@@ -896,8 +939,7 @@ static void schedule_zero(struct thin_c *tc, dm_block_t virt_block,
 	struct pool *pool = tc->pool;
 	struct dm_thin_new_mapping *m = get_next_mapping(pool);
 
-	m->quiesced = true;
-	m->prepared = false;
+	atomic_set(&m->prepare_actions, 1); /* no need to quiesce */
 	m->tc = tc;
 	m->virt_block = virt_block;
 	m->data_block = data_block;
@@ -919,21 +961,51 @@ static void schedule_zero(struct thin_c *tc, dm_block_t virt_block,
 		save_and_set_endio(bio, &m->saved_bi_end_io, overwrite_endio);
 		inc_all_io_entry(pool, bio);
 		remap_and_issue(tc, bio, data_block);
-	} else {
-		int r;
-		struct dm_io_region to;
 
-		to.bdev = tc->pool_dev->bdev;
-		to.sector = data_block * pool->sectors_per_block;
-		to.count = pool->sectors_per_block;
+	} else
+		ll_zero(tc, m,
+			data_block * pool->sectors_per_block,
+			(data_block + 1) * pool->sectors_per_block);
+}
 
-		r = dm_kcopyd_zero(pool->copier, 1, &to, 0, copy_complete, m);
-		if (r < 0) {
-			mempool_free(m, pool->mapping_pool);
-			DMERR_LIMIT("dm_kcopyd_zero() failed");
-			cell_error(pool, cell);
-		}
-	}
+static void schedule_external_copy(struct thin_c *tc, dm_block_t virt_block,
+				   dm_block_t data_dest,
+				   struct dm_bio_prison_cell *cell, struct bio *bio)
+{
+	struct pool *pool = tc->pool;
+	sector_t virt_block_begin = virt_block * pool->sectors_per_block;
+	sector_t virt_block_end = (virt_block + 1) * pool->sectors_per_block;
+
+	if (virt_block_end <= tc->origin_size)
+		schedule_copy(tc, virt_block, tc->origin_dev,
+			      virt_block, data_dest, cell, bio,
+			      pool->sectors_per_block);
+
+	else if (virt_block_begin < tc->origin_size)
+		schedule_copy(tc, virt_block, tc->origin_dev,
+			      virt_block, data_dest, cell, bio,
+			      tc->origin_size - virt_block_begin);
+
+	else
+		schedule_zero(tc, virt_block, data_dest, cell, bio);
+}
+
+static void set_pool_mode(struct pool *pool, enum pool_mode new_mode);
+
+static void check_for_space(struct pool *pool)
+{
+	int r;
+	dm_block_t nr_free;
+
+	if (get_pool_mode(pool) != PM_OUT_OF_DATA_SPACE)
+		return;
+
+	r = dm_pool_get_free_block_count(pool->pmd, &nr_free);
+	if (r)
+		return;
+
+	if (nr_free)
+		set_pool_mode(pool, PM_WRITE);
 }
 
 /*
@@ -950,6 +1022,8 @@ static int commit(struct pool *pool)
 	r = dm_pool_commit_metadata(pool->pmd);
 	if (r)
 		metadata_operation_failed(pool, "dm_pool_commit_metadata", r);
+	else
+		check_for_space(pool);
 
 	return r;
 }
@@ -967,8 +1041,6 @@ static void check_low_water_mark(struct pool *pool, dm_block_t free_blocks)
 		dm_table_event(pool->ti->table);
 	}
 }
-
-static void set_pool_mode(struct pool *pool, enum pool_mode new_mode);
 
 static int alloc_data_block(struct thin_c *tc, dm_block_t *result)
 {
@@ -1315,7 +1387,18 @@ static void process_bio(struct thin_c *tc, struct bio *bio)
 			inc_all_io_entry(pool, bio);
 			cell_defer_no_holder(tc, cell);
 
-			remap_to_origin_and_issue(tc, bio);
+			if (bio_end_sector(bio) <= tc->origin_size)
+				remap_to_origin_and_issue(tc, bio);
+
+			else if (bio->bi_iter.bi_sector < tc->origin_size) {
+				zero_fill_bio(bio);
+				bio->bi_iter.bi_size = (tc->origin_size - bio->bi_iter.bi_sector) << SECTOR_SHIFT;
+				remap_to_origin_and_issue(tc, bio);
+
+			} else {
+				zero_fill_bio(bio);
+				bio_endio(bio, 0);
+			}
 		} else
 			provision_block(tc, bio, block, cell);
 		break;
@@ -1759,7 +1842,7 @@ static void set_pool_mode(struct pool *pool, enum pool_mode new_mode)
 		pool->process_bio = process_bio_read_only;
 		pool->process_discard = process_discard;
 		pool->process_prepared_mapping = process_prepared_mapping;
-		pool->process_prepared_discard = process_prepared_discard_passdown;
+		pool->process_prepared_discard = process_prepared_discard;
 
 		if (!pool->pf.error_if_no_space && no_space_timeout)
 			queue_delayed_work(pool->wq, &pool->no_space_timeout, no_space_timeout);
@@ -1871,6 +1954,14 @@ static int thin_bio_map(struct dm_target *ti, struct bio *bio)
 		return DM_MAPIO_SUBMITTED;
 	}
 
+	/*
+	 * We must hold the virtual cell before doing the lookup, otherwise
+	 * there's a race with discard.
+	 */
+	build_virtual_key(tc->td, block, &key);
+	if (dm_bio_detain(tc->pool->prison, &key, bio, &cell1, &cell_result))
+		return DM_MAPIO_SUBMITTED;
+
 	r = dm_thin_find_block(td, block, 0, &result);
 
 	/*
@@ -1894,12 +1985,9 @@ static int thin_bio_map(struct dm_target *ti, struct bio *bio)
 			 * shared flag will be set in their case.
 			 */
 			thin_defer_bio(tc, bio);
+			cell_defer_no_holder_no_free(tc, &cell1);
 			return DM_MAPIO_SUBMITTED;
 		}
-
-		build_virtual_key(tc->td, block, &key);
-		if (dm_bio_detain(tc->pool->prison, &key, bio, &cell1, &cell_result))
-			return DM_MAPIO_SUBMITTED;
 
 		build_data_key(tc->td, result.block, &key);
 		if (dm_bio_detain(tc->pool->prison, &key, bio, &cell2, &cell_result)) {
@@ -1921,6 +2009,7 @@ static int thin_bio_map(struct dm_target *ti, struct bio *bio)
 			 * of doing so.
 			 */
 			handle_unserviceable_bio(tc->pool, bio);
+			cell_defer_no_holder_no_free(tc, &cell1);
 			return DM_MAPIO_SUBMITTED;
 		}
 		/* fall through */
@@ -1931,6 +2020,7 @@ static int thin_bio_map(struct dm_target *ti, struct bio *bio)
 		 * provide the hint to load the metadata into cache.
 		 */
 		thin_defer_bio(tc, bio);
+		cell_defer_no_holder_no_free(tc, &cell1);
 		return DM_MAPIO_SUBMITTED;
 
 	default:
@@ -1940,6 +2030,7 @@ static int thin_bio_map(struct dm_target *ti, struct bio *bio)
 		 * pool is switched to fail-io mode.
 		 */
 		bio_io_error(bio);
+		cell_defer_no_holder_no_free(tc, &cell1);
 		return DM_MAPIO_SUBMITTED;
 	}
 }
@@ -3112,7 +3203,7 @@ static void pool_io_hints(struct dm_target *ti, struct queue_limits *limits)
 	 */
 	if (io_opt_sectors < pool->sectors_per_block ||
 	    do_div(io_opt_sectors, pool->sectors_per_block)) {
-		blk_limits_io_min(limits, 0);
+		blk_limits_io_min(limits, pool->sectors_per_block << SECTOR_SHIFT);
 		blk_limits_io_opt(limits, pool->sectors_per_block << SECTOR_SHIFT);
 	}
 
@@ -3141,7 +3232,7 @@ static struct target_type pool_target = {
 	.name = "thin-pool",
 	.features = DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE |
 		    DM_TARGET_IMMUTABLE,
-	.version = {1, 12, 0},
+	.version = {1, 13, 0},
 	.module = THIS_MODULE,
 	.ctr = pool_ctr,
 	.dtr = pool_dtr,
@@ -3175,13 +3266,13 @@ static void thin_dtr(struct dm_target *ti)
 	struct thin_c *tc = ti->private;
 	unsigned long flags;
 
-	thin_put(tc);
-	wait_for_completion(&tc->can_destroy);
-
 	spin_lock_irqsave(&tc->pool->lock, flags);
 	list_del_rcu(&tc->list);
 	spin_unlock_irqrestore(&tc->pool->lock, flags);
 	synchronize_rcu();
+
+	thin_put(tc);
+	wait_for_completion(&tc->can_destroy);
 
 	mutex_lock(&dm_thin_pool_table.mutex);
 
@@ -3361,8 +3452,7 @@ static int thin_endio(struct dm_target *ti, struct bio *bio, int err)
 		spin_lock_irqsave(&pool->lock, flags);
 		list_for_each_entry_safe(m, tmp, &work, list) {
 			list_del(&m->list);
-			m->quiesced = true;
-			__maybe_add_mapping(m);
+			__complete_mapping_preparation(m);
 		}
 		spin_unlock_irqrestore(&pool->lock, flags);
 	}
@@ -3399,6 +3489,16 @@ static void thin_postsuspend(struct dm_target *ti)
 	 * unfortunately we must always run this.
 	 */
 	noflush_work(tc, do_noflush_stop);
+}
+
+static int thin_preresume(struct dm_target *ti)
+{
+	struct thin_c *tc = ti->private;
+
+	if (tc->origin_dev)
+		tc->origin_size = get_dev_size(tc->origin_dev->bdev);
+
+	return 0;
 }
 
 /*
@@ -3483,12 +3583,13 @@ static int thin_iterate_devices(struct dm_target *ti,
 
 static struct target_type thin_target = {
 	.name = "thin",
-	.version = {1, 12, 0},
+	.version = {1, 13, 0},
 	.module	= THIS_MODULE,
 	.ctr = thin_ctr,
 	.dtr = thin_dtr,
 	.map = thin_map,
 	.end_io = thin_endio,
+	.preresume = thin_preresume,
 	.presuspend = thin_presuspend,
 	.postsuspend = thin_postsuspend,
 	.status = thin_status,

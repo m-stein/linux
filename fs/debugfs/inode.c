@@ -66,7 +66,7 @@ static struct inode *debugfs_get_inode(struct super_block *sb, umode_t mode, dev
 			break;
 		}
 	}
-	return inode; 
+	return inode;
 }
 
 /* SMP-safe */
@@ -317,7 +317,7 @@ static struct dentry *__create_file(const char *name, umode_t mode,
 		goto exit;
 
 	/* If the parent is not specified, we create it in the root.
-	 * We need the root dentry to do this, which is in the super 
+	 * We need the root dentry to do this, which is in the super
 	 * block. A pointer to that is in the struct vfsmount that we
 	 * have around.
 	 */
@@ -330,7 +330,7 @@ static struct dentry *__create_file(const char *name, umode_t mode,
 		switch (mode & S_IFMT) {
 		case S_IFDIR:
 			error = debugfs_mkdir(parent->d_inode, dentry, mode);
-					      
+
 			break;
 		case S_IFLNK:
 			error = debugfs_link(parent->d_inode, dentry, mode,
@@ -553,7 +553,7 @@ void debugfs_remove_recursive(struct dentry *dentry)
 	 * use the d_u.d_child as the rcu head and corrupt this list.
 	 */
 	spin_lock(&parent->d_lock);
-	list_for_each_entry(child, &parent->d_subdirs, d_u.d_child) {
+	list_for_each_entry(child, &parent->d_subdirs, d_child) {
 		if (!debugfs_positive(child))
 			continue;
 

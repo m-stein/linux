@@ -1340,12 +1340,11 @@ static void build_feature_ctl(struct mixer_build *state, void *raw_desc,
 	 */
 	if (range > 384) {
 		usb_audio_warn(state->chip,
-			       "Warning! Unlikely big volume range (=%u), "
-			       "cval->res is probably wrong.",
+			       "Warning! Unlikely big volume range (=%u), cval->res is probably wrong.",
 			       range);
-		usb_audio_warn(state->chip, "[%d] FU [%s] ch = %d, "
-			       "val = %d/%d/%d", cval->id,
-			       kctl->id.name, cval->channels,
+		usb_audio_warn(state->chip,
+			       "[%d] FU [%s] ch = %d, val = %d/%d/%d",
+			       cval->id, kctl->id.name, cval->channels,
 			       cval->min, cval->max, cval->res);
 	}
 
@@ -2034,10 +2033,11 @@ static int parse_audio_selector_unit(struct mixer_build *state, int unitid,
 	cval->res = 1;
 	cval->initialized = 1;
 
-	if (desc->bDescriptorSubtype == UAC2_CLOCK_SELECTOR)
-		cval->control = UAC2_CX_CLOCK_SELECTOR;
-	else
+	if (state->mixer->protocol == UAC_VERSION_1)
 		cval->control = 0;
+	else /* UAC_VERSION_2 */
+		cval->control = (desc->bDescriptorSubtype == UAC2_CLOCK_SELECTOR) ?
+			UAC2_CX_CLOCK_SELECTOR : UAC2_SU_SELECTOR;
 
 	namelist = kmalloc(sizeof(char *) * desc->bNrInPins, GFP_KERNEL);
 	if (!namelist) {
