@@ -83,6 +83,8 @@ static void mx5_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
 	u32 empgc0, empgc1;
 	int stop_mode = 0;
 
+	if (GENODE_TZ_VMM) { printk(KERN_NOTICE "GENODE_TZ_VMM: skip %s\n", __func__); return; }
+
 	/* always allow platform to issue a deep sleep mode request */
 	plat_lpc = __raw_readl(cortex_base + MXC_CORTEXA8_PLAT_LPC) &
 	    ~(MXC_CORTEXA8_PLAT_LPC_DSM);
