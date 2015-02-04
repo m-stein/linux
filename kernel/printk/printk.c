@@ -55,8 +55,9 @@
 #include "console_cmdline.h"
 #include "braille.h"
 
+unsigned volatile genode_tz_vmm_trace;
 
-bool genode_tz_io(void * const r, void volatile * const p, unsigned const v)
+bool genode_tz_io(void * const r, const volatile void * const d, unsigned const w, unsigned const v)
 {
 	enum {
 		UART1_VBASE0 = 0x53fbc000, UART1_VEND0 = 0x53fbc040,

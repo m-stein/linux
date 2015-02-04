@@ -45,7 +45,7 @@ extern void atomic_io_modify_relaxed(void __iomem *reg, u32 mask, u32 set);
 
 #define GENODE_TZ_VMM 1
 
-extern bool genode_tz_io(void * const r, void volatile * const p, unsigned const v);
+extern bool genode_tz_io(void * const r, const volatile void * const d, unsigned const w, unsigned const v);
 
 /*
  * Generic IO read/write.  These perform native-endian accesses.  Note
@@ -75,7 +75,7 @@ extern void __raw_readsl(const void __iomem *addr, void *data, int longlen);
  */
 static inline void __raw_writew(u16 val, volatile void __iomem *addr)
 {
-	if (genode_tz_io(__builtin_return_address(0), addr, val)) { return; }
+	if (genode_tz_io(__builtin_return_address(0), addr, 1, val)) { return; }
 	asm volatile("strh %1, %0"
 		     : "+Q" (*(volatile u16 __force *)addr)
 		     : "r" (val));
@@ -87,13 +87,14 @@ static inline u16 __raw_readw(const volatile void __iomem *addr)
 	asm volatile("ldrh %1, %0"
 		     : "+Q" (*(volatile u16 __force *)addr),
 		       "=r" (val));
+	if (genode_tz_io(__builtin_return_address(0), addr, 0, val)) { return val; }
 	return val;
 }
 #endif
 
 static inline void __raw_writeb(u8 val, volatile void __iomem *addr)
 {
-	if (genode_tz_io(__builtin_return_address(0), addr, val)) { return; }
+	if (genode_tz_io(__builtin_return_address(0), addr, 1, val)) { return; }
 	asm volatile("strb %1, %0"
 		     : "+Qo" (*(volatile u8 __force *)addr)
 		     : "r" (val));
@@ -101,7 +102,7 @@ static inline void __raw_writeb(u8 val, volatile void __iomem *addr)
 
 static inline void __raw_writel(u32 val, volatile void __iomem *addr)
 {
-	if (genode_tz_io(__builtin_return_address(0), addr, val)) { return; }
+	if (genode_tz_io(__builtin_return_address(0), addr, 1, val)) { return; }
 	asm volatile("str %1, %0"
 		     : "+Qo" (*(volatile u32 __force *)addr)
 		     : "r" (val));
@@ -113,6 +114,7 @@ static inline u8 __raw_readb(const volatile void __iomem *addr)
 	asm volatile("ldrb %1, %0"
 		     : "+Qo" (*(volatile u8 __force *)addr),
 		       "=r" (val));
+	if (genode_tz_io(__builtin_return_address(0), addr, 0, val)) { return val; }
 	return val;
 }
 
@@ -122,6 +124,7 @@ static inline u32 __raw_readl(const volatile void __iomem *addr)
 	asm volatile("ldr %1, %0"
 		     : "+Qo" (*(volatile u32 __force *)addr),
 		       "=r" (val));
+	if (genode_tz_io(__builtin_return_address(0), addr, 0, val)) { return val; }
 	return val;
 }
 
