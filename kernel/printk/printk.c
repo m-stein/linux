@@ -60,12 +60,21 @@ unsigned volatile genode_tz_vmm_trace;
 bool genode_tz_io(void * const r, const volatile void * const d, unsigned const w, unsigned const v)
 {
 	enum {
-		UART1_VBASE0 = 0x53fbc000, UART1_VEND0 = 0x53fbc040,
-		UART1_VBASE1 = 0x53fbc044, UART1_VEND1 = 0x53fc0000,
-		TZIC_VBASE0  = 0xf4bfc000, TZIC_VEND0  = 0xf4c00000,
-		GPT_VBASE0   = 0xf57a0000, GPT_VEND0   = 0xf57a1000,
-		CM_VBASE0    = 0xf57d4000, CM_VEND0    = 0xf57d5000,
+		UART1_VBASE0     = 0x53fbc000, UART1_VEND0     = 0x53fbc040,
+		UART1_VBASE1     = 0x53fbc044, UART1_VEND1     = 0x53fc0000,
+		TZIC_VBASE0      = 0xf4bfc000, TZIC_VEND0      = 0xf4c00000,
+		GPT_VBASE0       = 0xf57a0000, GPT_VEND0       = 0xf57a1000,
+		CM_VBASE0        = 0xf57d4000, CM_VEND0        = 0xf57d5000,
+		ESDHCV2_1_VBASE0 = 0x908a8000, ESDHCV2_1_VEND0 = 0x908ac000, /* phys 0x50004000 */
+		ESDHCV3_3_VBASE0 = 0x908b0000, ESDHCV3_3_VEND0 = 0x908b4000, /* phys 0x50020000 */
 	};
+	unsigned const u = (unsigned)d;
+	if (
+		   (u < ESDHCV2_1_VBASE0 || u >= ESDHCV2_1_VEND0)
+		&& (u < ESDHCV3_3_VBASE0 || u >= ESDHCV3_3_VEND0)
+	) { return 0; }
+	if (!genode_tz_vmm_trace) { return 0; }
+	printk(KERN_NOTICE "---%c %p %x %x\n", w ? 'w' : 'r', r, u, v);
 	return 0;
 }
 

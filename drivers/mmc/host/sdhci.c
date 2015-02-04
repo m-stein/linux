@@ -2115,6 +2115,8 @@ static const struct mmc_host_ops sdhci_ops = {
  *                                                                           *
 \*****************************************************************************/
 
+extern unsigned volatile genode_tz_vmm_trace;
+
 static void sdhci_tasklet_finish(unsigned long param)
 {
 	struct sdhci_host *host;
@@ -2125,11 +2127,15 @@ static void sdhci_tasklet_finish(unsigned long param)
 
 	spin_lock_irqsave(&host->lock, flags);
 
+genode_tz_vmm_trace = 0;
+
         /*
          * If this tasklet gets rescheduled while running, it will
          * be run again afterwards but without any active request.
          */
 	if (!host->mrq) {
+
+genode_tz_vmm_trace = 1;
 		spin_unlock_irqrestore(&host->lock, flags);
 		return;
 	}
@@ -2168,6 +2174,9 @@ static void sdhci_tasklet_finish(unsigned long param)
 #endif
 
 	mmiowb();
+
+genode_tz_vmm_trace = 1;
+
 	spin_unlock_irqrestore(&host->lock, flags);
 
 	mmc_request_done(host->mmc, mrq);
@@ -2433,7 +2442,12 @@ static irqreturn_t sdhci_irq(int irq, void *dev_id)
 
 	spin_lock(&host->lock);
 
+genode_tz_vmm_trace = 0;
+
 	if (host->runtime_suspended && !sdhci_sdio_irq_enabled(host)) {
+
+genode_tz_vmm_trace = 1;
+
 		spin_unlock(&host->lock);
 		return IRQ_NONE;
 	}
@@ -2516,6 +2530,9 @@ static irqreturn_t sdhci_irq(int irq, void *dev_id)
 		intmask = sdhci_readl(host, SDHCI_INT_STATUS);
 	} while (intmask && --max_loops);
 out:
+
+genode_tz_vmm_trace = 1;
+
 	spin_unlock(&host->lock);
 
 	if (unexpected) {

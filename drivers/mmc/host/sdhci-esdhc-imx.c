@@ -923,12 +923,16 @@ static const struct sdhci_pltfm_data sdhci_esdhc_imx_pdata = {
 	.ops = &sdhci_esdhc_ops,
 };
 
+extern unsigned volatile genode_tz_vmm_trace;
+
 #ifdef CONFIG_OF
 static int
 sdhci_esdhc_imx_probe_dt(struct platform_device *pdev,
 			 struct esdhc_platform_data *boarddata)
 {
 	struct device_node *np = pdev->dev.of_node;
+
+genode_tz_vmm_trace = 1;
 
 	if (!np)
 		return -ENODEV;

@@ -2417,6 +2417,9 @@ void mmc_rescan(struct work_struct *work)
 		host->trigger_card_event = false;
 	}
 
+static bool volatile rescanned = 0;
+if (rescanned) { host->rescan_disable = 1; }
+
 	if (host->rescan_disable)
 		return;
 
@@ -2476,6 +2479,8 @@ void mmc_rescan(struct work_struct *work)
  out:
 	if (host->caps & MMC_CAP_NEEDS_POLL)
 		mmc_schedule_delayed_work(&host->detect, HZ);
+
+rescanned = 1;
 }
 
 void mmc_start_host(struct mmc_host *host)
