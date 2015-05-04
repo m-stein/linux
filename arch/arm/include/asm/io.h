@@ -30,6 +30,8 @@
 #include <asm-generic/pci_iomap.h>
 #include <xen/xen.h>
 
+#define GENODE_TZ_VMM 1
+
 /*
  * ISA I/O bus memory addresses are 1:1 with the physical address.
  */
