@@ -1072,6 +1072,7 @@ CONFIG_BLK_DEV_LOOP_MIN_COUNT=8
 # CONFIG_ATA_OVER_ETH is not set
 # CONFIG_MG_DISK is not set
 # CONFIG_BLK_DEV_RBD is not set
+CONFIG_BLK_DEV_GENODE=y
 
 #
 # Misc devices
