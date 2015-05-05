@@ -17,6 +17,7 @@
 
 / {
 	chosen {
+		bootargs = "console=ttymxc0,115200 earlyprintk loglevel=10";
 		linux,initrd-start = <0x82000000>;
 		linux,initrd-end = <0x8b453de9>;
 		stdout-path = &uart1;
