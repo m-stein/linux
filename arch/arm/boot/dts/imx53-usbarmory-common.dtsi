@@ -18,13 +18,13 @@
 / {
 	chosen {
 		bootargs = "console=ttymxc0,115200 earlyprintk loglevel=10";
-		linux,initrd-start = <0x82000000>;
-		linux,initrd-end = <0x8b453de9>;
+		linux,initrd-start = <0x72000000>;
+		linux,initrd-end = <0x72421717>;
 		stdout-path = &uart1;
 	};
 
 	memory {
-		reg = <0x80000000 0x10000000>;
+		reg = <0x70000000 0x1c000000>;
 	};
 
 	leds {
