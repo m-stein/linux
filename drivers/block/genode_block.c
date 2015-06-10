@@ -27,10 +27,13 @@
 #include <linux/interrupt.h>
 
 enum {
-	SMC_ID_BLOCK_COUNT = 100,
-//	SMC_ID_BLOCK_NAME,
-//	SMC_ID_BLOCK_GEOMETRY,
-//	SMC_ID_BLOCK_REQUEST,
+	SMC_ID_BLK_DCOUNT    = 100,
+	SMC_ID_BLK_BCOUNT    = 101,
+	SMC_ID_BLK_BSIZE     = 102,
+	SMC_ID_BLK_WRITEABLE = 103,
+	SMC_ID_BLK_QSIZE     = 104,
+//	SMC_ID_BLOCK_NAME    = 105,
+//	SMC_ID_BLOCK_REQUEST = 106,
 };
 
 #define SMC_1_ARGS             long arg_0
@@ -102,22 +105,27 @@ long secure_monitor_call_4(SMC_4_ARGS)
 
 
 unsigned genode_block_count(void) {
-	return secure_monitor_call_1(SMC_ID_BLOCK_COUNT); };
+	return secure_monitor_call_1(SMC_ID_BLK_DCOUNT); };
 
-//
+
 //const char *genode_block_name(unsigned idx)
 //{
 //	secure_monitor_call(SMC_BLOCK_NAME);
 //	return "unknown";
 //}
-//
-//void genode_block_geometry(unsigned idx, unsigned long *blk_cnt,
-//                           unsigned long *blk_sz, int *writeable,
-//                           unsigned long *req_queue_sz)
-//{
-//	secure_monitor_call(SMC_BLOCK_GEOMETRY);
-//}
-//
+
+
+void genode_block_geometry(unsigned idx, unsigned long *blk_cnt,
+                           unsigned long *blk_sz, int *writeable,
+                           unsigned long *req_queue_sz)
+{
+	*blk_cnt      = secure_monitor_call_2(SMC_ID_BLK_BCOUNT,    idx);
+	*blk_sz       = secure_monitor_call_2(SMC_ID_BLK_BSIZE,     idx);
+	*writeable    = secure_monitor_call_2(SMC_ID_BLK_WRITEABLE, idx);
+	*req_queue_sz = secure_monitor_call_2(SMC_ID_BLK_QSIZE,     idx);
+}
+
+
 //void genode_block_request(unsigned idx, unsigned long sz,
 //                           void *req, unsigned long *offset, unsigned long queue_offset,
 //                         unsigned long size, unsigned long long disc_offset,
@@ -130,25 +138,25 @@ unsigned genode_block_count(void) {
 //	KERNEL_SECTOR_SIZE = 512,      /* sector size used by kernel */
 //	GENODE_BLK_MINORS  = 16        /* number of minor numbers */
 //};
-//
-//
-///*
-// * The internal representation of our device.
-// */
-//struct genode_blk_device {
-//	unsigned              blk_cnt;    /* Total block count */
-//	unsigned long         blk_sz;     /* Single block size */
-//	spinlock_t            lock;       /* For mutual exclusion */
-//	struct gendisk       *gd;         /* Generic disk structure */
-//	struct request_queue *queue;      /* The device request queue */
-//	struct semaphore      queue_wait; /* Used to block, when queue is full */
-//	short                 stopped;    /* Indicates queue availability */
-//	unsigned              idx;        /* drive index */
-//};
-//
+
+
+/*
+ * The internal representation of our device.
+ */
+struct genode_blk_device {
+	unsigned              blk_cnt;    /* Total block count */
+	unsigned long         blk_sz;     /* Single block size */
+	spinlock_t            lock;       /* For mutual exclusion */
+	struct gendisk       *gd;         /* Generic disk structure */
+	struct request_queue *queue;      /* The device request queue */
+	struct semaphore      queue_wait; /* Used to block, when queue is full */
+	short                 stopped;    /* Indicates queue availability */
+	unsigned              idx;        /* drive index */
+};
+
 enum { MAX_DISKS = 16 };
-//static struct genode_blk_device blk_devs[MAX_DISKS];
-//
+static struct genode_blk_device blk_devs[MAX_DISKS];
+
 ///*
 // * Handle an I/O request.
 // */
@@ -280,31 +288,35 @@ enum { MAX_DISKS = 16 };
 static int __init genode_blk_init(void)
 {
 //	int      err;
-//	unsigned drive;
-//	unsigned drive_cnt;
-	unsigned block_cnt;
+	unsigned drive;
+	unsigned drive_cnt;
 
-	printk(KERN_NOTICE "%s %u\n", __func__, __LINE__);
-	block_cnt = genode_block_count();
-	printk(KERN_NOTICE "%s %u %u\n", __func__, __LINE__, block_cnt);
-//	drive_cnt = (block_count > MAX_DISKS) ? MAX_DISKS : block_cnt;
-//
-//	/**
-//	 * Loop through all Genode block devices and register them in Linux.
-//	 */
-//	for (drive = 0 ; drive < drive_cnt; drive++) {
+	drive_cnt = genode_block_count();
+	if (drive_cnt > MAX_DISKS) { drive_cnt = MAX_DISKS; }
+	printk(KERN_NOTICE "genode block: drive count %u\n", drive_cnt);
+
+	/**
+	 * Loop through all Genode block devices and register them in Linux.
+	 */
+	for (drive = 0 ; drive < drive_cnt; drive++) {
 //		int           major_num;
-//		int           writeable    = 0;
-//		unsigned long req_queue_sz = 0;
-//
-//		/* Initialize device structure */
-//		memset (&blk_devs[drive], 0, sizeof(struct genode_blk_device));
-//		blk_devs[drive].idx = drive;
-//		spin_lock_init(&blk_devs[drive].lock);
-//
-//		genode_block_geometry(drive, (unsigned long*)&blk_devs[drive].blk_cnt,
-//		                      &blk_devs[drive].blk_sz, &writeable, &req_queue_sz);
-//
+		int           writeable    = 0;
+		unsigned long req_queue_sz = 0;
+
+		/* Initialize device structure */
+		memset (&blk_devs[drive], 0, sizeof(struct genode_blk_device));
+		blk_devs[drive].idx = drive;
+		spin_lock_init(&blk_devs[drive].lock);
+
+		genode_block_geometry(drive, (unsigned long*)&blk_devs[drive].blk_cnt,
+		                      &blk_devs[drive].blk_sz, &writeable, &req_queue_sz);
+
+		printk(KERN_NOTICE "genode block: drive %u\n", drive);
+		printk(KERN_NOTICE "   block count %u\n", blk_devs[drive].blk_cnt);
+		printk(KERN_NOTICE "   block size %lu\n", blk_devs[drive].blk_sz);
+		printk(KERN_NOTICE "   writeable %u\n", writeable);
+		printk(KERN_NOTICE "   queue size %lu\n", req_queue_sz);
+
 //		/**
 //		 * Obtain an IRQ for the drive.
 //		 */
@@ -374,9 +386,10 @@ static int __init genode_blk_init(void)
 //
 //		/* Make the block device available to the system */
 //		add_disk(blk_devs[drive].gd);
-//	}
-//
-//	printk(KERN_NOTICE "Genode blk-file driver initialized\n");
+	}
+
+	printk(KERN_NOTICE "genode block: initialized\n");
+	while(1);
 	return 0;
 }
 
