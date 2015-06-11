@@ -33,6 +33,7 @@ enum {
 	SMC_ID_BLK_WRITEABLE = 103,
 	SMC_ID_BLK_QSIZE     = 104,
 	SMC_ID_BLK_IRQ       = 105,
+	SMC_ID_BLK_CALLBACK  = 106,
 };
 
 #define SMC_1_ARGS             long arg_0
@@ -110,6 +111,12 @@ unsigned genode_block_irq(unsigned idx) {
 unsigned genode_block_count(void) {
 	return secure_monitor_call_1(SMC_ID_BLK_DCOUNT); };
 
+
+void genode_block_register_callback(void (*func)(void*, short,
+                                    void*, unsigned long))
+{
+	secure_monitor_call_2(SMC_ID_BLK_CALLBACK, (unsigned long)func);
+}
 
 const char *genode_block_name(unsigned idx)
 {
@@ -231,9 +238,10 @@ static void genode_blk_request(struct request_queue *q)
 }
 
 
-//static void FASTCALL
-//genode_end_request(void *request, short write,
-//                   void *buf, unsigned long sz) {
+static void
+genode_end_request(void *request, short write,
+                   void *buf, unsigned long sz) {
+
 //	struct request *req = (struct request*) request;
 //	struct genode_blk_device *dev = req->rq_disk->private_data;
 //	char *ptr = (char*) buf;
@@ -255,33 +263,34 @@ static void genode_blk_request(struct request_queue *q)
 //		dev->stopped = 0;
 //		up(&dev->queue_wait);
 //	}
-//}
-//
-//
-//static int genode_blk_getgeo(struct block_device *bdev, struct hd_geometry *geo)
-//{
+}
+
+
+static int genode_blk_getgeo(struct block_device *bdev, struct hd_geometry *geo)
+{
 //	struct genode_blk_device *dev  = bdev->bd_disk->private_data;
 //	unsigned long             size = dev->blk_cnt * dev->blk_sz *
 //	                                 (dev->blk_sz / KERNEL_SECTOR_SIZE);
 //	geo->cylinders = size >> 7;
 //	geo->heads     = 4;
 //	geo->sectors   = 32;
-//	return 0;
-//}
-//
-//
-///*
-// * The device operations structure.
-// */
-//static struct block_device_operations genode_blk_ops = {
-//		.owner  = THIS_MODULE,
-//		.getgeo = genode_blk_getgeo
-//};
-//
-//
+	return 0;
+}
+
+
+/*
+ * The device operations structure.
+ */
+static struct block_device_operations genode_blk_ops = {
+		.owner  = THIS_MODULE,
+		.getgeo = genode_blk_getgeo
+};
+
+
 static irqreturn_t event_interrupt(int irq, void *data)
 {
 	printk(KERN_NOTICE "event_interrupt not implemented, irq %u\n", irq);
+	while(1);
 	return -1;
 //	unsigned long flags;
 //	struct genode_blk_device *dev = (struct genode_blk_device *)data;
@@ -370,32 +379,33 @@ static int __init genode_blk_init(void)
 		printk(KERN_NOTICE "   major number %u\n", major_num);
 		printk(KERN_NOTICE "   name         \"%s\"\n", name);
 
-//		/*
-//		 * Allocate and setup generic disk structure.
-//		 */
-//		if(!(blk_devs[drive].gd = alloc_disk(GENODE_BLK_MINORS))) {
-//				unregister_blkdev(major_num, genode_block_name(drive));
-//				return -ENOMEM;
-//		}
-//		blk_devs[drive].gd->major        = major_num;
-//		blk_devs[drive].gd->first_minor  = 0;
-//		blk_devs[drive].gd->fops         = &genode_blk_ops;
-//		blk_devs[drive].gd->private_data = &blk_devs[drive];
-//		blk_devs[drive].gd->queue        = blk_devs[drive].queue;
-//		strncpy(blk_devs[drive].gd->disk_name, genode_block_name(drive),
-//		        sizeof(blk_devs[drive].gd->disk_name));
-//		set_capacity(blk_devs[drive].gd, blk_devs[drive].blk_cnt *
-//		                         (blk_devs[drive].blk_sz / KERNEL_SECTOR_SIZE));
-//
-//		/* Set it read-only or writeable */
-//		if (!writeable)
-//			set_disk_ro(blk_devs[drive].gd, 1);
-//
-//		if (drive == 0)
-//			genode_block_register_callback(genode_end_request);
-//
-//		/* Make the block device available to the system */
-//		add_disk(blk_devs[drive].gd);
+		/*
+		 * Allocate and setup generic disk structure.
+		 */
+		if(!(blk_devs[drive].gd = alloc_disk(GENODE_BLK_MINORS))) {
+				unregister_blkdev(major_num, name);
+				printk(KERN_NOTICE "genode block: failed to alloc disc\n");
+				return -ENOMEM;
+		}
+		blk_devs[drive].gd->major        = major_num;
+		blk_devs[drive].gd->first_minor  = 0;
+		blk_devs[drive].gd->fops         = &genode_blk_ops;
+		blk_devs[drive].gd->private_data = &blk_devs[drive];
+		blk_devs[drive].gd->queue        = blk_devs[drive].queue;
+		strncpy(blk_devs[drive].gd->disk_name, name,
+		        sizeof(blk_devs[drive].gd->disk_name));
+		set_capacity(blk_devs[drive].gd, blk_devs[drive].blk_cnt *
+		                         (blk_devs[drive].blk_sz / KERNEL_SECTOR_SIZE));
+
+		/* Set it read-only or writeable */
+		if (!writeable)
+			set_disk_ro(blk_devs[drive].gd, 1);
+
+		if (drive == 0)
+			genode_block_register_callback(genode_end_request);
+
+		/* Make the block device available to the system */
+		add_disk(blk_devs[drive].gd);
 	}
 
 	printk(KERN_NOTICE "genode block: initialized\n");
@@ -407,7 +417,8 @@ static int __init genode_blk_init(void)
 
 static void __exit genode_blk_exit(void)
 {
-	printk(KERN_NOTICE "%s %u\n", __func__, __LINE__);
+	printk(KERN_NOTICE "genode_blk_exit not implemented\n");
+	while(1);
 //	unsigned drive, drive_cnt = (genode_block_count() > MAX_DISKS)
 //	                            ? MAX_DISKS : genode_block_count();
 //	for (drive = 0 ; drive < drive_cnt; drive++) {
