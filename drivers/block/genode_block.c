@@ -111,11 +111,11 @@ unsigned genode_block_count(void) {
 	return secure_monitor_call_1(SMC_ID_BLK_DCOUNT); };
 
 
-//const char *genode_block_name(unsigned idx)
-//{
-//	secure_monitor_call(SMC_BLOCK_NAME);
-//	return "unknown";
-//}
+const char *genode_block_name(unsigned idx)
+{
+	printk(KERN_NOTICE "genode_block_name not implemented");
+	return "mmcblk0";
+}
 
 
 void genode_block_geometry(unsigned idx, unsigned long *blk_cnt,
@@ -136,11 +136,11 @@ void genode_block_geometry(unsigned idx, unsigned long *blk_cnt,
 //{
 //	secure_monitor_call(SMC_BLOCK_REQUEST);
 //}
-//
-//enum Geometry {
-//	KERNEL_SECTOR_SIZE = 512,      /* sector size used by kernel */
-//	GENODE_BLK_MINORS  = 16        /* number of minor numbers */
-//};
+
+enum Geometry {
+	KERNEL_SECTOR_SIZE = 512,      /* sector size used by kernel */
+	GENODE_BLK_MINORS  = 16        /* number of minor numbers */
+};
 
 
 /*
@@ -306,9 +306,10 @@ static int __init genode_blk_init(void)
 	 * Loop through all Genode block devices and register them in Linux.
 	 */
 	for (drive = 0 ; drive < drive_cnt; drive++) {
-//		int           major_num;
+		int           major_num;
 		int           writeable    = 0;
 		unsigned long req_queue_sz = 0;
+		char const *  name;
 
 		/* Initialize device structure */
 		memset (&blk_devs[drive], 0, sizeof(struct genode_blk_device));
@@ -328,44 +329,47 @@ static int __init genode_blk_init(void)
 			return err;
 		}
 
-		printk(KERN_NOTICE "genode block: drive %u\n", drive);
-		printk(KERN_NOTICE "   block count %u\n", blk_devs[drive].blk_cnt);
-		printk(KERN_NOTICE "   block size  %lu\n", blk_devs[drive].blk_sz);
-		printk(KERN_NOTICE "   writeable   %u\n", writeable);
-		printk(KERN_NOTICE "   queue size  %lu\n", req_queue_sz);
-		printk(KERN_NOTICE "   irq         %u\n", blk_devs[drive].irq);
-
 		/*
 		 * Get a request queue.
 		 */
 		if(!(blk_devs[drive].queue = blk_init_queue(genode_blk_request,
 		                                           &blk_devs[drive].lock)))
 				return -ENOMEM;
-//
-//		/*
-//		 * Align queue requests to hardware sector size.
-//		 */
-//		blk_queue_logical_block_size(blk_devs[drive].queue, blk_devs[drive].blk_sz);
-//
-//		/*
-//		 * Important, limit number of sectors per request,
-//		 * as Genode's block-session has a limited request-transmit-queue.
-//		 */
-//		blk_queue_max_hw_sectors(blk_devs[drive].queue, req_queue_sz / KERNEL_SECTOR_SIZE);
-//		blk_devs[drive].queue->queuedata = &blk_devs[drive];
-//
-//		sema_init(&blk_devs[drive].queue_wait, 0);
-//		blk_devs[drive].stopped = 0;
-//
-//		/*
-//		 * Register block device and gain major number.
-//		 */
-//		major_num = register_blkdev(0, genode_block_name(drive));
-//		if(major_num < 1) {
-//				printk(KERN_WARNING "genode_blk: unable to get major number\n");
-//				return -EBUSY;
-//		}
-//
+
+		/*
+		 * Align queue requests to hardware sector size.
+		 */
+		blk_queue_logical_block_size(blk_devs[drive].queue, blk_devs[drive].blk_sz);
+
+		/*
+		 * Important, limit number of sectors per request,
+		 * as Genode's block-session has a limited request-transmit-queue.
+		 */
+		blk_queue_max_hw_sectors(blk_devs[drive].queue, req_queue_sz / KERNEL_SECTOR_SIZE);
+		blk_devs[drive].queue->queuedata = &blk_devs[drive];
+
+		sema_init(&blk_devs[drive].queue_wait, 0);
+		blk_devs[drive].stopped = 0;
+
+		/*
+		 * Register block device and gain major number.
+		 */
+		name = genode_block_name(drive);
+		major_num = register_blkdev(0, name);
+		if(major_num < 1) {
+				printk(KERN_WARNING "genode_blk: unable to get major number\n");
+				return -EBUSY;
+		}
+
+		printk(KERN_NOTICE "genode block: drive %u\n", drive);
+		printk(KERN_NOTICE "   block count  %u\n", blk_devs[drive].blk_cnt);
+		printk(KERN_NOTICE "   block size   %lu\n", blk_devs[drive].blk_sz);
+		printk(KERN_NOTICE "   writeable    %u\n", writeable);
+		printk(KERN_NOTICE "   queue size   %lu\n", req_queue_sz);
+		printk(KERN_NOTICE "   irq          %u\n", blk_devs[drive].irq);
+		printk(KERN_NOTICE "   major number %u\n", major_num);
+		printk(KERN_NOTICE "   name         \"%s\"\n", name);
+
 //		/*
 //		 * Allocate and setup generic disk structure.
 //		 */
