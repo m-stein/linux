@@ -32,8 +32,7 @@ enum {
 	SMC_ID_BLK_BSIZE     = 102,
 	SMC_ID_BLK_WRITEABLE = 103,
 	SMC_ID_BLK_QSIZE     = 104,
-//	SMC_ID_BLOCK_NAME    = 105,
-//	SMC_ID_BLOCK_REQUEST = 106,
+	SMC_ID_BLK_IRQ       = 105,
 };
 
 #define SMC_1_ARGS             long arg_0
@@ -104,6 +103,10 @@ long secure_monitor_call_4(SMC_4_ARGS)
 }
 
 
+unsigned genode_block_irq(unsigned idx) {
+	return secure_monitor_call_2(SMC_ID_BLK_IRQ, idx); };
+
+
 unsigned genode_block_count(void) {
 	return secure_monitor_call_1(SMC_ID_BLK_DCOUNT); };
 
@@ -152,6 +155,7 @@ struct genode_blk_device {
 	struct semaphore      queue_wait; /* Used to block, when queue is full */
 	short                 stopped;    /* Indicates queue availability */
 	unsigned              idx;        /* drive index */
+	unsigned              irq;        /* irq number */
 };
 
 enum { MAX_DISKS = 16 };
@@ -274,20 +278,22 @@ static struct genode_blk_device blk_devs[MAX_DISKS];
 //};
 //
 //
-//static irqreturn_t event_interrupt(int irq, void *data)
-//{
+static irqreturn_t event_interrupt(int irq, void *data)
+{
+	printk(KERN_NOTICE "event_interrupt not implemented, irq %u\n", irq);
+	return IRQ_HANDLED;
 //	unsigned long flags;
 //	struct genode_blk_device *dev = (struct genode_blk_device *)data;
 //	spin_lock_irqsave(dev->queue->queue_lock, flags);
 //	genode_block_collect_responses(dev->idx);
 //	spin_unlock_irqrestore(dev->queue->queue_lock, flags);
 //	return IRQ_HANDLED;
-//}
+}
 
 
 static int __init genode_blk_init(void)
 {
-//	int      err;
+	int      err;
 	unsigned drive;
 	unsigned drive_cnt;
 
@@ -311,23 +317,22 @@ static int __init genode_blk_init(void)
 		genode_block_geometry(drive, (unsigned long*)&blk_devs[drive].blk_cnt,
 		                      &blk_devs[drive].blk_sz, &writeable, &req_queue_sz);
 
+		/**
+		 * Obtain an IRQ for the drive.
+		 */
+		blk_devs[drive].irq = genode_block_irq(drive);
+		if ((err = request_irq(blk_devs[drive].irq, event_interrupt, 0,
+		                       "genode block", &blk_devs[drive]))) {
+			printk(KERN_WARNING "genode block: err %d on IRQ request\n", err);
+			return err;
+		}
+
 		printk(KERN_NOTICE "genode block: drive %u\n", drive);
 		printk(KERN_NOTICE "   block count %u\n", blk_devs[drive].blk_cnt);
-		printk(KERN_NOTICE "   block size %lu\n", blk_devs[drive].blk_sz);
-		printk(KERN_NOTICE "   writeable %u\n", writeable);
-		printk(KERN_NOTICE "   queue size %lu\n", req_queue_sz);
-
-//		/**
-//		 * Obtain an IRQ for the drive.
-//		 */
-//		blk_devs[drive].irq_cap = genode_block_irq_cap(drive);
-//		if ((blk_devs[drive].irq = l4x_register_irq(blk_devs[drive].irq_cap)) < 0)
-//			return -ENOMEM;
-//		if ((err = request_irq(blk_devs[drive].irq, event_interrupt, 0,
-//		                       "Genode block", &blk_devs[drive]))) {
-//			printk(KERN_WARNING "%s: request_irq failed: %d\n", __func__, err);
-//			return err;
-//		}
+		printk(KERN_NOTICE "   block size  %lu\n", blk_devs[drive].blk_sz);
+		printk(KERN_NOTICE "   writeable   %u\n", writeable);
+		printk(KERN_NOTICE "   queue size  %lu\n", req_queue_sz);
+		printk(KERN_NOTICE "   irq         %u\n", blk_devs[drive].irq);
 //
 //		/*
 //		 * Get a request queue.
