@@ -161,11 +161,12 @@ struct genode_blk_device {
 enum { MAX_DISKS = 16 };
 static struct genode_blk_device blk_devs[MAX_DISKS];
 
-///*
-// * Handle an I/O request.
-// */
-//static void genode_blk_request(struct request_queue *q)
-//{
+/*
+ * Handle an I/O request.
+ */
+static void genode_blk_request(struct request_queue *q)
+{
+	printk(KERN_NOTICE "genode_blk_request not implemented\n");
 //	struct request *req;
 //	unsigned long  queue_offset;
 //	void          *buf;
@@ -227,9 +228,9 @@ static struct genode_blk_device blk_devs[MAX_DISKS];
 //
 //		genode_block_submit(dev->idx, queue_offset, nbytes, offset, write);
 //	}
-//}
-//
-//
+}
+
+
 //static void FASTCALL
 //genode_end_request(void *request, short write,
 //                   void *buf, unsigned long sz) {
@@ -281,7 +282,7 @@ static struct genode_blk_device blk_devs[MAX_DISKS];
 static irqreturn_t event_interrupt(int irq, void *data)
 {
 	printk(KERN_NOTICE "event_interrupt not implemented, irq %u\n", irq);
-	return IRQ_HANDLED;
+	return -1;
 //	unsigned long flags;
 //	struct genode_blk_device *dev = (struct genode_blk_device *)data;
 //	spin_lock_irqsave(dev->queue->queue_lock, flags);
@@ -333,13 +334,13 @@ static int __init genode_blk_init(void)
 		printk(KERN_NOTICE "   writeable   %u\n", writeable);
 		printk(KERN_NOTICE "   queue size  %lu\n", req_queue_sz);
 		printk(KERN_NOTICE "   irq         %u\n", blk_devs[drive].irq);
-//
-//		/*
-//		 * Get a request queue.
-//		 */
-//		if(!(blk_devs[drive].queue = blk_init_queue(genode_blk_request,
-//		                                           &blk_devs[drive].lock)))
-//				return -ENOMEM;
+
+		/*
+		 * Get a request queue.
+		 */
+		if(!(blk_devs[drive].queue = blk_init_queue(genode_blk_request,
+		                                           &blk_devs[drive].lock)))
+				return -ENOMEM;
 //
 //		/*
 //		 * Align queue requests to hardware sector size.
