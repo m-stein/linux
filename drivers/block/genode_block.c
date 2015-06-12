@@ -26,6 +26,57 @@
 #include <linux/semaphore.h>
 #include <linux/interrupt.h>
 
+#define SMC_1_1_ARGS               long arg_0
+#define SMC_2_1_ARGS SMC_1_1_ARGS, long arg_1
+#define SMC_3_1_ARGS SMC_2_1_ARGS, long arg_2
+#define SMC_4_1_ARGS SMC_3_1_ARGS, long arg_3
+#define SMC_4_2_ARGS SMC_4_1_ARGS, long * ret_1
+
+#define SMC_X_1_RETURN return   arg_0_reg;
+#define SMC_X_2_RETURN *ret_1 = arg_1_reg; SMC_X_1_RETURN
+
+#define SMC_1_X_REGS              register long arg_0_reg asm("r0") = arg_0;
+#define SMC_2_X_REGS SMC_1_X_REGS register long arg_1_reg asm("r1") = arg_1;
+#define SMC_3_X_REGS SMC_2_X_REGS register long arg_2_reg asm("r2") = arg_2;
+#define SMC_4_X_REGS SMC_3_X_REGS register long arg_3_reg asm("r3") = arg_3;
+
+#define SMC_1_X_ASM ".arch_extension sec\nsmc #0\n" : "+r" (arg_0_reg)
+#define SMC_2_X_ASM SMC_1_X_ASM:                       "r" (arg_1_reg)
+#define SMC_3_X_ASM SMC_2_X_ASM,                       "r" (arg_2_reg)
+#define SMC_4_X_ASM SMC_3_X_ASM,                       "r" (arg_3_reg)
+
+long secure_monitor_call_1_1(SMC_1_1_ARGS)
+{
+	SMC_1_X_REGS
+	asm volatile (SMC_1_X_ASM);
+	SMC_X_1_RETURN
+}
+
+
+long secure_monitor_call_2_1(SMC_2_1_ARGS)
+{
+	SMC_2_X_REGS
+	asm volatile (SMC_2_X_ASM);
+	SMC_X_1_RETURN
+}
+
+
+long secure_monitor_call_3_1(SMC_3_1_ARGS)
+{
+	SMC_3_X_REGS
+	asm volatile (SMC_3_X_ASM);
+	SMC_X_1_RETURN
+}
+
+
+long secure_monitor_call_4_2(SMC_4_2_ARGS)
+{
+	SMC_4_X_REGS
+	asm volatile (SMC_4_X_ASM);
+	SMC_X_2_RETURN
+}
+
+
 enum {
 	SMC_ID_BLK_DCOUNT    = 100,
 	SMC_ID_BLK_BCOUNT    = 101,
@@ -34,88 +85,22 @@ enum {
 	SMC_ID_BLK_QSIZE     = 104,
 	SMC_ID_BLK_IRQ       = 105,
 	SMC_ID_BLK_CALLBACK  = 106,
+	SMC_ID_BLK_REQUEST   = 107,
 };
-
-#define SMC_1_ARGS             long arg_0
-#define SMC_2_ARGS SMC_1_ARGS, long arg_1
-#define SMC_3_ARGS SMC_2_ARGS, long arg_2
-#define SMC_4_ARGS SMC_3_ARGS, long arg_3
-
-#define SMC_1_FILL_ARG_REGS \
-	register long arg_0_reg asm("r0") = arg_0;
-
-#define SMC_2_FILL_ARG_REGS \
-	SMC_1_FILL_ARG_REGS \
-	register long arg_1_reg asm("r1") = arg_1;
-
-#define SMC_3_FILL_ARG_REGS \
-	SMC_2_FILL_ARG_REGS \
-	register long arg_2_reg asm("r2") = arg_2;
-
-#define SMC_4_FILL_ARG_REGS \
-	SMC_3_FILL_ARG_REGS \
-	register long arg_3_reg asm("r3") = arg_3;
-
-#define SMC_5_FILL_ARG_REGS \
-	SMC_4_FILL_ARG_REGS \
-	register long arg_4_reg asm("r4") = arg_4;
-
-#define SMC_6_FILL_ARG_REGS \
-	SMC_5_FILL_ARG_REGS \
-	register long arg_5_reg asm("r5") = arg_5;
-
-#define SMC_1_ASM ".arch_extension sec\nsmc #0\n" : "+r" (arg_0_reg)
-#define SMC_2_ASM SMC_1_ASM:  "r" (arg_1_reg)
-#define SMC_3_ASM SMC_2_ASM,  "r" (arg_2_reg)
-#define SMC_4_ASM SMC_3_ASM,  "r" (arg_3_reg)
-#define SMC_5_ASM SMC_4_ASM,  "r" (arg_4_reg)
-#define SMC_6_ASM SMC_5_ASM,  "r" (arg_5_reg)
-
-
-long secure_monitor_call_1(SMC_1_ARGS)
-{
-	SMC_1_FILL_ARG_REGS
-	asm volatile(SMC_1_ASM);
-	return arg_0_reg;
-}
-
-
-long secure_monitor_call_2(SMC_2_ARGS)
-{
-	SMC_2_FILL_ARG_REGS
-	asm volatile(SMC_2_ASM);
-	return arg_0_reg;
-}
-
-
-long secure_monitor_call_3(SMC_3_ARGS)
-{
-	SMC_3_FILL_ARG_REGS
-	asm volatile(SMC_3_ASM);
-	return arg_0_reg;
-}
-
-
-long secure_monitor_call_4(SMC_4_ARGS)
-{
-	SMC_4_FILL_ARG_REGS
-	asm volatile(SMC_4_ASM);
-	return arg_0_reg;
-}
 
 
 unsigned genode_block_irq(unsigned idx) {
-	return secure_monitor_call_2(SMC_ID_BLK_IRQ, idx); };
+	return secure_monitor_call_2_1(SMC_ID_BLK_IRQ, idx); };
 
 
 unsigned genode_block_count(void) {
-	return secure_monitor_call_1(SMC_ID_BLK_DCOUNT); };
+	return secure_monitor_call_1_1(SMC_ID_BLK_DCOUNT); };
 
 
 void genode_block_register_callback(void (*func)(void*, short,
                                     void*, unsigned long))
 {
-	secure_monitor_call_2(SMC_ID_BLK_CALLBACK, (unsigned long)func);
+	secure_monitor_call_2_1(SMC_ID_BLK_CALLBACK, (unsigned long)func);
 }
 
 const char *genode_block_name(unsigned idx)
@@ -129,20 +114,19 @@ void genode_block_geometry(unsigned idx, unsigned long *blk_cnt,
                            unsigned long *blk_sz, int *writeable,
                            unsigned long *req_queue_sz)
 {
-	*blk_cnt      = secure_monitor_call_2(SMC_ID_BLK_BCOUNT,    idx);
-	*blk_sz       = secure_monitor_call_2(SMC_ID_BLK_BSIZE,     idx);
-	*writeable    = secure_monitor_call_2(SMC_ID_BLK_WRITEABLE, idx);
-	*req_queue_sz = secure_monitor_call_2(SMC_ID_BLK_QSIZE,     idx);
+	*blk_cnt      = secure_monitor_call_2_1(SMC_ID_BLK_BCOUNT,    idx);
+	*blk_sz       = secure_monitor_call_2_1(SMC_ID_BLK_BSIZE,     idx);
+	*writeable    = secure_monitor_call_2_1(SMC_ID_BLK_WRITEABLE, idx);
+	*req_queue_sz = secure_monitor_call_2_1(SMC_ID_BLK_QSIZE,     idx);
 }
 
 
-//void genode_block_request(unsigned idx, unsigned long sz,
-//                           void *req, unsigned long *offset, unsigned long queue_offset,
-//                         unsigned long size, unsigned long long disc_offset,
-//                         int write)
-//{
-//	secure_monitor_call(SMC_BLOCK_REQUEST);
-//}
+void* genode_block_request(unsigned idx, unsigned long sz,
+                           void * req, unsigned long * offset)
+{
+	return (void *)secure_monitor_call_4_2(SMC_ID_BLK_REQUEST, idx, sz,
+	                                       (long)req, offset);
+}
 
 enum Geometry {
 	KERNEL_SECTOR_SIZE = 512,      /* sector size used by kernel */
@@ -173,32 +157,38 @@ static struct genode_blk_device blk_devs[MAX_DISKS];
  */
 static void genode_blk_request(struct request_queue *q)
 {
+	struct request *req;
+	unsigned long  queue_offset;
+	void          *buf;
+	unsigned long long  offset;
+	unsigned long  nbytes;
+	short          write;
+	struct genode_blk_device* dev;
 	printk(KERN_NOTICE "genode_blk_request not implemented\n");
-//	struct request *req;
-//	unsigned long  queue_offset;
-//	void          *buf;
-//	unsigned long long  offset;
-//	unsigned long  nbytes;
-//	short          write;
-//	struct genode_blk_device* dev;
-//
-//	while ((req = blk_fetch_request(q))) {
-//		dev = req->rq_disk->private_data;
-//		buf    = 0;
-//		offset = blk_rq_pos(req) * KERNEL_SECTOR_SIZE;
-//		nbytes = blk_rq_bytes(req);
-//		write  = rq_data_dir(req) == WRITE;
-//
-//		if (req->cmd_type != REQ_TYPE_FS) {
-//			printk(KERN_NOTICE "Skip non-fs request\n");
-//			__blk_end_request_all(req, -EIO);
-//			continue;
-//		}
-//
+
+	while ((req = blk_fetch_request(q))) {
+		dev = req->rq_disk->private_data;
+		buf    = 0;
+		offset = blk_rq_pos(req) * KERNEL_SECTOR_SIZE;
+		nbytes = blk_rq_bytes(req);
+		write  = rq_data_dir(req) == WRITE;
+
+		if (req->cmd_type != REQ_TYPE_FS) {
+			printk(KERN_NOTICE "Skip non-fs request\n");
+			__blk_end_request_all(req, -EIO);
+			continue;
+		}
+
 //		while (!buf) {
 //			unsigned long flags;
 //
-//			if ((buf = genode_block_request(dev->idx, nbytes, req, &queue_offset)))
+
+printk(KERN_NOTICE "genode_block_request dev %u size %lu req %p\n", dev->idx, nbytes, req);
+			if ((buf = genode_block_request(dev->idx, nbytes, req, &queue_offset)))
+printk(KERN_NOTICE "genode_block_request returned buf %p off %lx\n", buf, queue_offset);
+else
+printk(KERN_NOTICE "genode_block_request returned buf 0 off %lx\n", queue_offset);
+while(1);
 //				break;
 //
 //			/* stop_queue needs disabled interrupts */
@@ -234,7 +224,7 @@ static void genode_blk_request(struct request_queue *q)
 //		}
 //
 //		genode_block_submit(dev->idx, queue_offset, nbytes, offset, write);
-//	}
+	}
 }
 
 
