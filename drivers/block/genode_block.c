@@ -31,6 +31,9 @@
 #define SMC_3_1_ARGS SMC_2_1_ARGS, long arg_2
 #define SMC_4_1_ARGS SMC_3_1_ARGS, long arg_3
 #define SMC_4_2_ARGS SMC_4_1_ARGS, long * ret_1
+#define SMC_5_1_ARGS SMC_4_1_ARGS, long arg_4
+#define SMC_6_1_ARGS SMC_5_1_ARGS, long arg_5
+#define SMC_7_1_ARGS SMC_6_1_ARGS, long arg_6
 
 #define SMC_X_1_RETURN return   arg_0_reg;
 #define SMC_X_2_RETURN *ret_1 = arg_1_reg; SMC_X_1_RETURN
@@ -39,11 +42,17 @@
 #define SMC_2_X_REGS SMC_1_X_REGS register long arg_1_reg asm("r1") = arg_1;
 #define SMC_3_X_REGS SMC_2_X_REGS register long arg_2_reg asm("r2") = arg_2;
 #define SMC_4_X_REGS SMC_3_X_REGS register long arg_3_reg asm("r3") = arg_3;
+#define SMC_5_X_REGS SMC_4_X_REGS register long arg_4_reg asm("r4") = arg_4;
+#define SMC_6_X_REGS SMC_5_X_REGS register long arg_5_reg asm("r5") = arg_5;
+#define SMC_7_X_REGS SMC_6_X_REGS register long arg_6_reg asm("r6") = arg_6;
 
 #define SMC_1_X_ASM ".arch_extension sec\nsmc #0\n" : "+r" (arg_0_reg)
-#define SMC_2_X_ASM SMC_1_X_ASM:                       "r" (arg_1_reg)
-#define SMC_3_X_ASM SMC_2_X_ASM,                       "r" (arg_2_reg)
-#define SMC_4_X_ASM SMC_3_X_ASM,                       "r" (arg_3_reg)
+#define SMC_2_X_ASM SMC_1_X_ASM,                      "+r" (arg_1_reg)
+#define SMC_3_X_ASM SMC_2_X_ASM,                      "+r" (arg_2_reg)
+#define SMC_4_X_ASM SMC_3_X_ASM,                      "+r" (arg_3_reg)
+#define SMC_5_X_ASM SMC_4_X_ASM,                      "+r" (arg_4_reg)
+#define SMC_6_X_ASM SMC_5_X_ASM,                      "+r" (arg_5_reg)
+#define SMC_7_X_ASM SMC_6_X_ASM,                      "+r" (arg_6_reg)
 
 long secure_monitor_call_1_1(SMC_1_1_ARGS)
 {
@@ -76,6 +85,13 @@ long secure_monitor_call_4_2(SMC_4_2_ARGS)
 	SMC_X_2_RETURN
 }
 
+long secure_monitor_call_7_1(SMC_7_1_ARGS)
+{
+	SMC_7_X_REGS
+	asm volatile (SMC_7_X_ASM);
+	SMC_X_1_RETURN
+}
+
 
 enum {
 	SMC_ID_BLK_DCOUNT    = 100,
@@ -86,6 +102,7 @@ enum {
 	SMC_ID_BLK_IRQ       = 105,
 	SMC_ID_BLK_CALLBACK  = 106,
 	SMC_ID_BLK_REQUEST   = 107,
+	SMC_ID_BLK_SUBMIT    = 108,
 };
 
 
@@ -95,6 +112,16 @@ unsigned genode_block_irq(unsigned idx) {
 
 unsigned genode_block_count(void) {
 	return secure_monitor_call_1_1(SMC_ID_BLK_DCOUNT); };
+
+
+void genode_block_submit(unsigned idx, unsigned long queue_offset,
+                         unsigned long size, unsigned long long disc_offset,
+                         int write)
+{
+	secure_monitor_call_7_1(SMC_ID_BLK_SUBMIT, idx, queue_offset, size,
+	                        (unsigned long)(disc_offset >> 32),
+	                        (unsigned long)disc_offset, write);
+}
 
 
 void genode_block_register_callback(void (*func)(void*, short,
@@ -164,7 +191,6 @@ static void genode_blk_request(struct request_queue *q)
 	unsigned long  nbytes;
 	short          write;
 	struct genode_blk_device* dev;
-	printk(KERN_NOTICE "genode_blk_request not implemented\n");
 
 	while ((req = blk_fetch_request(q))) {
 		dev = req->rq_disk->private_data;
@@ -179,51 +205,57 @@ static void genode_blk_request(struct request_queue *q)
 			continue;
 		}
 
-//		while (!buf) {
-//			unsigned long flags;
-//
+		while (!buf) {
+			unsigned long flags;
+
 
 printk(KERN_NOTICE "genode_block_request dev %u size %lu req %p\n", dev->idx, nbytes, req);
 			if ((buf = genode_block_request(dev->idx, nbytes, req, &queue_offset)))
-printk(KERN_NOTICE "genode_block_request returned buf %p off %lx\n", buf, queue_offset);
-else
-printk(KERN_NOTICE "genode_block_request returned buf 0 off %lx\n", queue_offset);
+{
+printk(KERN_NOTICE "genode_block_request returned buf %p qoff %lx\n", buf, queue_offset);
+				break;
+} else {
+printk(KERN_NOTICE "genode_block_request returned buf 0 qoff %lx\n", queue_offset);
+}
 while(1);
-//				break;
-//
-//			/* stop_queue needs disabled interrupts */
-//			local_irq_save(flags);
-//			blk_stop_queue(q);
-//
-//			dev->stopped = 1;
-//
-//			/*
-//			 * This function is called with the request queue lock held, unlock to
-//			 * enable VCPU IRQs
-//			 */
-//			spin_unlock_irqrestore(q->queue_lock, flags);
-//			/* block until new responses are available */
-//			down(&dev->queue_wait);
-//			spin_lock_irqsave(q->queue_lock, flags);
-//
-//			/* start_queue needs disabled interrupts */
-//			blk_start_queue(q);
-//			local_irq_restore(flags);
-//		}
-//
-//		if (write) {
-//			char               *ptr = (char*) buf;
-//			struct req_iterator iter;
-//			struct bio_vec     *bvec;
-//
-//			rq_for_each_segment(bvec, req, iter) {
-//				void *buffer = page_address(bvec->bv_page) + bvec->bv_offset;
-//				memcpy((void*)ptr, buffer, bvec->bv_len);
-//				ptr += bvec->bv_len;
-//			}
-//		}
-//
-//		genode_block_submit(dev->idx, queue_offset, nbytes, offset, write);
+
+			/* stop_queue needs disabled interrupts */
+			local_irq_save(flags);
+			blk_stop_queue(q);
+
+			dev->stopped = 1;
+
+			/*
+			 * This function is called with the request queue lock held, unlock to
+			 * enable VCPU IRQs
+			 */
+			spin_unlock_irqrestore(q->queue_lock, flags);
+			/* block until new responses are available */
+			down(&dev->queue_wait);
+			spin_lock_irqsave(q->queue_lock, flags);
+
+			/* start_queue needs disabled interrupts */
+			blk_start_queue(q);
+			local_irq_restore(flags);
+		}
+
+		if (write) {
+			char               *ptr = (char*) buf;
+			struct req_iterator iter;
+			struct bio_vec      bvec;
+
+			rq_for_each_segment(bvec, req, iter) {
+				void *buffer = page_address(bvec.bv_page) + bvec.bv_offset;
+				memcpy((void*)ptr, buffer, bvec.bv_len);
+				ptr += bvec.bv_len;
+			}
+		}
+
+
+printk(KERN_NOTICE "genode_block_submit dev %u qoff %lx size %lu off %llx write %u\n",
+       dev->idx, queue_offset, nbytes, offset, write);
+
+		genode_block_submit(dev->idx, queue_offset, nbytes, offset, write);
 	}
 }
 
