@@ -309,6 +309,7 @@ void handle_nested_irq(unsigned int irq)
 	struct irq_desc *desc = irq_to_desc(irq);
 	struct irqaction *action;
 	irqreturn_t action_ret;
+	if (irq == 108) { printk(KERN_NOTICE "irq1 %u\n", irq); }
 
 	might_sleep();
 
@@ -385,6 +386,7 @@ static bool irq_may_run(struct irq_desc *desc)
 void
 handle_simple_irq(unsigned int irq, struct irq_desc *desc)
 {
+	if (irq == 108) { printk(KERN_NOTICE "irq2 %u\n", irq); }
 	raw_spin_lock(&desc->lock);
 
 	if (!irq_may_run(desc))
@@ -436,6 +438,7 @@ static void cond_unmask_irq(struct irq_desc *desc)
 void
 handle_level_irq(unsigned int irq, struct irq_desc *desc)
 {
+//	printk(KERN_NOTICE "...irq3 %u %s\n", irq, desc->name);
 	raw_spin_lock(&desc->lock);
 	mask_ack_irq(desc);
 
@@ -508,6 +511,7 @@ void
 handle_fasteoi_irq(unsigned int irq, struct irq_desc *desc)
 {
 	struct irq_chip *chip = desc->irq_data.chip;
+	if (irq == 108) { printk(KERN_NOTICE "irq4 %u\n", irq); }
 
 	raw_spin_lock(&desc->lock);
 
@@ -563,6 +567,7 @@ EXPORT_SYMBOL_GPL(handle_fasteoi_irq);
 void
 handle_edge_irq(unsigned int irq, struct irq_desc *desc)
 {
+	if (irq == 108) { printk(KERN_NOTICE "irq5 %u\n", irq); }
 	raw_spin_lock(&desc->lock);
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
@@ -627,6 +632,7 @@ EXPORT_SYMBOL(handle_edge_irq);
 void handle_edge_eoi_irq(unsigned int irq, struct irq_desc *desc)
 {
 	struct irq_chip *chip = irq_desc_get_chip(desc);
+	if (irq == 108) { printk(KERN_NOTICE "irq6 %u\n", irq); }
 
 	raw_spin_lock(&desc->lock);
 
@@ -674,6 +680,7 @@ void
 handle_percpu_irq(unsigned int irq, struct irq_desc *desc)
 {
 	struct irq_chip *chip = irq_desc_get_chip(desc);
+	if (irq == 108) { printk(KERN_NOTICE "irq7 %u\n", irq); }
 
 	kstat_incr_irqs_this_cpu(irq, desc);
 
@@ -704,6 +711,7 @@ void handle_percpu_devid_irq(unsigned int irq, struct irq_desc *desc)
 	struct irqaction *action = desc->action;
 	void *dev_id = raw_cpu_ptr(action->percpu_dev_id);
 	irqreturn_t res;
+	if (irq == 108) { printk(KERN_NOTICE "irq8 %u\n", irq); }
 
 	kstat_incr_irqs_this_cpu(irq, desc);
 
@@ -765,6 +773,8 @@ __irq_set_handler(unsigned int irq, irq_flow_handler_t handle, int is_chained,
 		irq_state_set_disabled(desc);
 		desc->depth = 1;
 	}
+
+	if (irq == 108) { printk(KERN_NOTICE ">>> irq %u desc %p handle %p name %s\n", irq, desc, handle, name); }
 	desc->handle_irq = handle;
 	desc->name = name;
 

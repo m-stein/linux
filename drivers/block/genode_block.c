@@ -353,7 +353,7 @@ static int __init genode_blk_init(void)
 		/**
 		 * Obtain an IRQ for the drive.
 		 */
-		blk_devs[drive].irq = genode_block_irq(drive);
+		blk_devs[drive].irq = genode_block_irq(drive) - 16;
 		if ((err = request_irq(blk_devs[drive].irq, event_interrupt, 0,
 		                       "genode block", &blk_devs[drive]))) {
 			printk(KERN_WARNING "genode block: err %d on IRQ request\n", err);
